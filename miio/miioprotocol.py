@@ -10,6 +10,7 @@ import socket
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
+import threading 
 import construct
 
 from .exceptions import DeviceError, DeviceException, RecoverableError
@@ -45,6 +46,8 @@ class MiIOProtocol:
         self._timeout = timeout
         self.__id = start_id
 
+        self.lock = threading.Lock()
+        
         self._discovered = False
         # these come from the device, but we initialize them here to make mypy happy
         self._device_ts: datetime = datetime.utcnow()
@@ -114,6 +117,7 @@ class MiIOProtocol:
         s.settimeout(timeout)
         for _ in range(3):
             s.sendto(helobytes, (addr, 54321))
+            sleep(1)
         while True:
             try:
                 data, recv_addr = s.recvfrom(1024)
@@ -157,6 +161,12 @@ class MiIOProtocol:
         :raises DeviceException: if an error has occurred during communication.
         """
 
+        self.lock.acquire(True, 1)                                                                 
+                                                                                                   
+        if not self.lock.locked():                                                                 
+            sleep(.1)                                                                              
+            return self.send(command,parameters,retry_count,extra_parameters=extra_parameters,) 
+        
         if not self.lazy_discover or not self._discovered:
             self.send_handshake()
 
@@ -187,9 +197,11 @@ class MiIOProtocol:
             s.sendto(m, (self.ip, self.port))
         except OSError as ex:
             _LOGGER.error("failed to send msg: %s", ex)
+            self.lock.release() 
             raise DeviceException from ex
 
         try:
+            self.lock.release() 
             data, addr = s.recvfrom(4096)
             m = Message.parse(data, token=self.token)
 
